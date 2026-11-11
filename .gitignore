@@ -24,3 +24,5 @@ Thumbs.db
 
 
 diag_tmp/
+
+docker_push.bat
