@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AWS Report Generator</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',sans-serif;background:#f0f2f5;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
+.card{background:#fff;border-radius:12px;box-shadow:0 4px 24px rgba(0,0,0,.1);padding:36px;max-width:600px;width:100%}
+h1{color:#1F4E79;font-size:22px;margin-bottom:6px;text-align:center}
+p.sub{color:#666;font-size:13px;margin-bottom:20px;text-align:center}
+.upload-area{border:2px dashed #ccc;border-radius:8px;padding:28px;cursor:pointer;transition:.2s;margin-bottom:12px;text-align:center}
+.upload-area:hover{border-color:#2E75B6;background:#f8fbff}
+.upload-area .icon{font-size:36px;margin-bottom:6px}
+.upload-area .label{color:#666;font-size:13px}
+.file-list{margin:12px 0;font-size:13px;color:#333}
+.file-list div{padding:4px 8px;background:#f5f5f5;border-radius:4px;margin:3px 0;display:flex;justify-content:space-between}
+.file-list .remove{color:#d32f2f;cursor:pointer;font-weight:bold}
+input[type=file]{display:none}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>AWS Utilization Report Generator</h1>
+  <p class="sub">Upload file CloudViz (.docx) — support multiple files</p>
+  <div class="upload-area" id="dropZone">
+    <div class="icon">📄</div>
+    <div class="label">Klik atau drag file .docx ke sini (bisa multiple)</div>
+  </div>
+  <input type="file" id="fileInput" accept=".docx" multiple>
+  <div class="file-list" id="fileList"></div>
+  <div style="margin:12px 0;font-size:13px">
+    <label>Periode: </label>
+    <input type="date" id="startDate" style="padding:4px 8px;border:1px solid #ccc;border-radius:4px">
+    <span> s/d </span>
+    <input type="date" id="endDate" style="padding:4px 8px;border:1px solid #ccc;border-radius:4px">
+    <div style="color:#999;font-size:11px;margin-top:4px">Kosongkan untuk default 30 hari terakhir</div>
+  </div>
+  <div id="preview"></div>
+  <button id="btnPreview" onclick="previewGroups()" disabled>Preview Grouping</button>
+  <button id="btnGen" onclick="generate()" style="display:none">Generate Reports</button>
+  <div id="status"></div>
+
+  <hr style="margin:28px 0;border:none;border-top:1px solid #e0e0e0">
+  <h2 style="font-size:15px;color:#1F4E79;margin-bottom:6px">⚡ Generate Langsung (tanpa .docx)</h2>
+  <p class="sub" style="margin-bottom:14px">Isi manual account ID, nama customer, dan region</p>
+  <div style="display:flex;flex-direction:column;gap:8px;font-size:13px">
+    <div style="display:flex;gap:8px;align-items:center">
+      <label style="width:110px;color:#555">Account ID</label>
+      <input id="dAccountId" type="text" placeholder="e.g. 083264029433" style="flex:1;padding:7px 10px;border:1px solid #ccc;border-radius:6px;font-size:13px">
+    </div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <label style="width:110px;color:#555">Customer Name</label>
+      <input id="dCustomerName" type="text" placeholder="e.g. Payquest" style="flex:1;padding:7px 10px;border:1px solid #ccc;border-radius:6px;font-size:13px">
+    </div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <label style="width:110px;color:#555">Region</label>
+      <input id="dRegion" type="text" value="ap-southeast-3" style="flex:1;padding:7px 10px;border:1px solid #ccc;border-radius:6px;font-size:13px">
+    </div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <label style="width:110px;color:#555">Periode</label>
+      <input type="date" id="dStartDate" style="flex:1;padding:6px 8px;border:1px solid #ccc;border-radius:4px;font-size:13px">
+      <span style="color:#999">s/d</span>
+      <input type="date" id="dEndDate" style="flex:1;padding:6px 8px;border:1px solid #ccc;border-radius:4px;font-size:13px">
+    </div>
+    <div style="color:#999;font-size:11px;margin-left:118px">Kosongkan periode untuk default 30 hari terakhir</div>
+  </div>
+  <button id="btnDirect" onclick="generateDirect()" style="margin-top:10px">Generate Report</button>
+  <div id="statusDirect"></div>
+</div>
+</body>
+</html>
+<style>
+button{background:#2E75B6;color:#fff;border:none;border-radius:8px;padding:11px 24px;font-size:14px;cursor:pointer;width:100%;margin-top:8px;transition:.2s}
+button:hover:not(:disabled){background:#1F4E79}
+button:disabled{background:#ccc;cursor:not-allowed}
+#btnGen{background:#2e7d32}
+#btnGen:hover:not(:disabled){background:#1b5e20}
+#btnDirect{background:#6a1b9a}
+#btnDirect:hover:not(:disabled){background:#4a148c}
+#status{margin-top:14px;font-size:13px;color:#666}
+#status.error{color:#d32f2f}
+#status.success{color:#2e7d32}
+.spinner{display:inline-block;width:14px;height:14px;border:2px solid #ccc;border-top-color:#2E75B6;border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.group-box{background:#eef5fc;border:1px solid #c5ddf0;border-radius:6px;padding:10px 14px;margin:6px 0;font-size:13px}
+.group-box h3{color:#1F4E79;font-size:14px;margin-bottom:4px}
+.group-box .acct{color:#555;padding-left:12px}
+</style>
+<script>
+const dropZone=document.getElementById('dropZone'),fileInput=document.getElementById('fileInput'),
+  fileList=document.getElementById('fileList'),preview=document.getElementById('preview'),
+  btnP=document.getElementById('btnPreview'),btnG=document.getElementById('btnGen'),
+  status=document.getElementById('status');
+let selectedFiles=[];
+
+dropZone.onclick=()=>fileInput.click();
+fileInput.onchange=e=>{for(const f of e.target.files)addFile(f)};
+dropZone.ondragover=e=>{e.preventDefault();dropZone.style.borderColor='#2E75B6'};
+dropZone.ondragleave=()=>dropZone.style.borderColor='#ccc';
+dropZone.ondrop=e=>{e.preventDefault();dropZone.style.borderColor='#ccc';for(const f of e.dataTransfer.files)addFile(f)};
+
+function addFile(f){
+  if(!f.name.endsWith('.docx'))return;
+  if(selectedFiles.find(x=>x.name===f.name))return;
+  selectedFiles.push(f);renderFiles();
+}
+function removeFile(i){selectedFiles.splice(i,1);renderFiles();preview.innerHTML='';btnG.style.display='none'}
+function renderFiles(){
+  fileList.innerHTML=selectedFiles.map((f,i)=>
+    `<div>${f.name}<span class="remove" onclick="removeFile(${i})">✕</span></div>`).join('');
+  btnP.disabled=!selectedFiles.length;
+}
+</script>
+<script>
+async function previewGroups(){
+  if(!selectedFiles.length)return;
+  btnP.disabled=true;status.className='';status.innerHTML='<span class="spinner"></span> Analyzing files...';
+  const form=new FormData();
+  selectedFiles.forEach(f=>form.append('files',f));
+  try{
+    const r=await fetch('/preview',{method:'POST',body:form});
+    const d=await r.json();
+    if(!r.ok)throw new Error(d.detail||'Error');
+    let html=`<p style="font-size:13px;color:#333;margin:8px 0"><b>${d.total_reports} report(s)</b> akan di-generate:</p>`;
+    for(const[grp,accts]of Object.entries(d.groups)){
+      html+=`<div class="group-box"><h3>📊 ${grp}</h3>`;
+      accts.forEach(a=>html+=`<div class="acct">• ${a.customer_name} (${a.account_id}) — ${a.region}</div>`);
+      html+=`</div>`;
+    }
+    if(d.errors.length){
+      html+=`<p style="color:#d32f2f;font-size:12px;margin-top:6px">⚠️ ${d.errors.length} file gagal di-parse</p>`;
+    }
+    preview.innerHTML=html;
+    btnG.style.display='block';
+    status.textContent='';
+  }catch(e){status.className='error';status.textContent='❌ '+e.message}
+  btnP.disabled=false;
+}
+
+async function generate(){
+  btnG.disabled=true;status.className='';
+  status.innerHTML='<span class="spinner"></span> Generating reports... (bisa beberapa menit)';
+  const form=new FormData();
+  selectedFiles.forEach(f=>form.append('files',f));
+  const sd=document.getElementById('startDate').value;
+  const ed=document.getElementById('endDate').value;
+  let url='/generate';
+  if(sd&&ed) url+=`?start_date=${sd}&end_date=${ed}`;
+  try{
+    const r=await fetch(url,{method:'POST',body:form});
+    if(!r.ok){const e=await r.json();throw new Error(e.detail||'Error')}
+    const blob=await r.blob();
+    const ct=r.headers.get('content-type')||'';
+    const cd=r.headers.get('content-disposition')||'';
+    let fname='report.pptx';
+    if(ct.includes('zip'))fname='reports.zip';
+    const m=cd.match(/filename="?([^";]+)"?/);if(m)fname=m[1];
+    const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=fname;a.click();
+    status.className='success';status.textContent='✅ Report berhasil di-generate!';
+    // Fetch warnings
+    const lr=await fetch('/logs');const ld=await lr.json();
+    if(ld.logs&&ld.logs.length){
+      let whtml='<div style="margin-top:10px;padding:10px;background:#fff3e0;border:1px solid #ffe0b2;border-radius:6px;font-size:11px;max-height:150px;overflow-y:auto;text-align:left">';
+      whtml+='<b>⚠️ Warnings:</b><br>';
+      ld.logs.forEach(l=>whtml+=l+'<br>');
+      whtml+='</div>';
+      status.innerHTML+=whtml;
+    }
+  }catch(e){status.className='error';status.textContent='❌ '+e.message}
+  btnG.disabled=false;
+}
+
+async function generateDirect(){
+  const accountId=document.getElementById('dAccountId').value.trim();
+  const customerName=document.getElementById('dCustomerName').value.trim();
+  const region=document.getElementById('dRegion').value.trim();
+  const sd=document.getElementById('dStartDate').value;
+  const ed=document.getElementById('dEndDate').value;
+  const statusEl=document.getElementById('statusDirect');
+  const btn=document.getElementById('btnDirect');
+
+  if(!accountId||!customerName||!region){
+    statusEl.className='error';statusEl.textContent='❌ Account ID, Customer Name, dan Region wajib diisi';return;
+  }
+  btn.disabled=true;statusEl.className='';
+  statusEl.innerHTML='<span class="spinner"></span> Generating report... (bisa beberapa menit)';
+
+  let url=`/generate-direct?account_id=${encodeURIComponent(accountId)}&customer_name=${encodeURIComponent(customerName)}&region=${encodeURIComponent(region)}`;
+  if(sd&&ed) url+=`&start_date=${sd}&end_date=${ed}`;
+
+  try{
+    const r=await fetch(url,{method:'POST'});
+    if(!r.ok){const e=await r.json();throw new Error(e.detail||'Error')}
+    const blob=await r.blob();
+    const cd=r.headers.get('content-disposition')||'';
+    let fname=`${accountId}_report.pptx`;
+    const m=cd.match(/filename="?([^";]+)"?/);if(m)fname=m[1];
+    const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=fname;a.click();
+    statusEl.className='success';statusEl.textContent='✅ Report berhasil di-generate!';
+  }catch(e){statusEl.className='error';statusEl.textContent='❌ '+e.message}
+  btn.disabled=false;
+}
+</script>
