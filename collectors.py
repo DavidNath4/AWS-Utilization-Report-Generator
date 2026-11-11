@@ -3,6 +3,10 @@ import os, json, logging
 from datetime import datetime, timedelta, timezone
 logger = logging.getLogger(__name__)
 
+# Nama metrik CloudWatch Agent default untuk Windows
+WIN_MEM = "Memory % Committed Bytes In Use"
+WIN_DISK_FREE = "LogicalDisk % Free Space"
+
 def get_metric(cw, ns, mn, dims, pd, stat="Maximum", start_date=None, end_date=None):
     try:
         et = end_date or datetime.now(timezone.utc)
@@ -55,10 +59,20 @@ def collect_ec2(session, pd, cd, start_date=None, end_date=None):
         nm = tags.get("Name", "-"); os_type = "Windows" if inst.get("Platform","").lower() == "windows" else "Linux"
         dims = [{"Name": "InstanceId", "Value": iid}]
         cpu = get_metric(cw, "AWS/EC2", "CPUUtilization", dims, pd, start_date=start_date, end_date=end_date)
-        mem = get_metric(cw, "CWAgent", "mem_used_percent", dims, pd, start_date=start_date, end_date=end_date)
         avg_cpu = get_metric(cw, "AWS/EC2", "CPUUtilization", dims, pd, stat="Average", start_date=start_date, end_date=end_date)
-        avg_mem = get_metric(cw, "CWAgent", "mem_used_percent", dims, pd, stat="Average", start_date=start_date, end_date=end_date)
-        avg_disk = get_metric(cw, "CWAgent", "disk_used_percent", dims, pd, stat="Average", start_date=start_date, end_date=end_date)
+        if os_type == "Windows":
+            # CWAgent Windows: nama metrik & dimension berbeda dengan Linux
+            mem_dims = [{"Name": "InstanceId", "Value": iid}, {"Name": "objectname", "Value": "Memory"}]
+            disk_dims = [{"Name": "InstanceId", "Value": iid}, {"Name": "objectname", "Value": "LogicalDisk"},
+                         {"Name": "instance", "Value": "C:"}]
+            mem = get_metric(cw, "CWAgent", WIN_MEM, mem_dims, pd, start_date=start_date, end_date=end_date)
+            avg_mem = get_metric(cw, "CWAgent", WIN_MEM, mem_dims, pd, stat="Average", start_date=start_date, end_date=end_date)
+            free = get_metric(cw, "CWAgent", WIN_DISK_FREE, disk_dims, pd, stat="Average", start_date=start_date, end_date=end_date)
+            avg_disk = round(100 - free, 2) if free != "-" else "-"  # metrik Windows = % free, report = % used
+        else:
+            mem = get_metric(cw, "CWAgent", "mem_used_percent", dims, pd, start_date=start_date, end_date=end_date)
+            avg_mem = get_metric(cw, "CWAgent", "mem_used_percent", dims, pd, stat="Average", start_date=start_date, end_date=end_date)
+            avg_disk = get_metric(cw, "CWAgent", "disk_used_percent", dims, pd, stat="Average", start_date=start_date, end_date=end_date)
         net_in = get_metric(cw, "AWS/EC2", "NetworkIn", dims, pd, stat="Average", start_date=start_date, end_date=end_date)
         net_out = get_metric(cw, "AWS/EC2", "NetworkOut", dims, pd, stat="Average", start_date=start_date, end_date=end_date)
         vol_read = get_metric(cw, "AWS/EC2", "EBSReadBytes", dims, pd, stat="Average", start_date=start_date, end_date=end_date)
@@ -69,8 +83,17 @@ def collect_ec2(session, pd, cd, start_date=None, end_date=None):
         vol_read_s = format_bytes(vol_read) if vol_read != "-" else "-"
         vol_write_s = format_bytes(vol_write) if vol_write != "-" else "-"
         cc = generate_chart(cw, f"CPU-{nm}({iid})", [["AWS/EC2","CPUUtilization","InstanceId",iid]], pd, os.path.join(cd, f"ec2_{iid}_cpu.png"), start_date=start_date, end_date=end_date)
-        mc = generate_chart(cw, f"Mem-{nm}({iid})", [["CWAgent","mem_used_percent","InstanceId",iid]], pd, os.path.join(cd, f"ec2_{iid}_mem.png"), start_date=start_date, end_date=end_date)
-        dc = generate_chart(cw, f"Disk-{nm}({iid})", [["CWAgent","disk_used_percent","InstanceId",iid]], pd, os.path.join(cd, f"ec2_{iid}_disk.png"), start_date=start_date, end_date=end_date)
+        if os_type == "Windows":
+            mem_metrics = [["CWAgent", WIN_MEM, "InstanceId", iid, "objectname", "Memory"]]
+            # Disk used % = 100 - free % (metric math), hanya C:
+            disk_metrics = [[{"expression": "100-m1", "label": "Disk used % (C:)", "id": "e1"}],
+                            ["CWAgent", WIN_DISK_FREE, "InstanceId", iid, "instance", "C:", "objectname", "LogicalDisk",
+                             {"id": "m1", "visible": False}]]
+        else:
+            mem_metrics = [["CWAgent","mem_used_percent","InstanceId",iid]]
+            disk_metrics = [["CWAgent","disk_used_percent","InstanceId",iid]]
+        mc = generate_chart(cw, f"Mem-{nm}({iid})", mem_metrics, pd, os.path.join(cd, f"ec2_{iid}_mem.png"), start_date=start_date, end_date=end_date)
+        dc = generate_chart(cw, f"Disk-{nm}({iid})", disk_metrics, pd, os.path.join(cd, f"ec2_{iid}_disk.png"), start_date=start_date, end_date=end_date)
         vwc = generate_chart(cw, f"VolumeWriteBytes-{nm}({iid})", [["AWS/EC2","EBSWriteBytes","InstanceId",iid]], pd, os.path.join(cd, f"ec2_{iid}_vol_write.png"), start_date=start_date, end_date=end_date)
         vrc = generate_chart(cw, f"VolumeReadBytes-{nm}({iid})", [["AWS/EC2","EBSReadBytes","InstanceId",iid]], pd, os.path.join(cd, f"ec2_{iid}_vol_read.png"), start_date=start_date, end_date=end_date)
         noc = generate_chart(cw, f"NetworkOut-{nm}({iid})", [["AWS/EC2","NetworkOut","InstanceId",iid]], pd, os.path.join(cd, f"ec2_{iid}_net_out.png"), start_date=start_date, end_date=end_date)

@@ -21,3 +21,6 @@ output/
 Thumbs.db
 .vscode/
 .idea/
+
+
+diag_tmp/
